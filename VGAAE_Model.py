@@ -1,4 +1,4 @@
-import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -57,19 +57,6 @@ class VGATEncoder(nn.Module):
 
     def forward(self, x, edge_index):
         hidden_out1, atten_w_1 = self.hidden_layer1(x, edge_index, return_attention_weights=True)
-        '''
-        对于数据集Baron_Mouse1,有822个细胞
-        
-        输入：Data(x=[822, 1000], edge_index=[2, 15180])
-        由于在GATConv模型中默认设置了add_self_loops: bool = True,因此还加上了每个节点与本身的边，即15180+822=16002
-        
-        输出：当return_attention_weights=True时，会返回一个元组，元组内容为(边列表，注意力权重)：
-            tuple:obj:`(edge_index, attention_weights)
-        edge_index: torch.Size([2, 16002])
-        weight: torch.Size([16002, 3]) --> [边数，注意力头数]
-        
-        结点自身与自身的边的注意力权重为1
-        '''
         hidden_out1 = F.relu(hidden_out1)
         hidden_out2, atten_w_2 = self.hidden_layer2(hidden_out1, edge_index, return_attention_weights=True)
         hidden_out2 = F.relu(hidden_out2)
@@ -79,7 +66,6 @@ class VGATEncoder(nn.Module):
         return z_mean, z_log_std, [atten_w_1, atten_w_2, atten_w_mean, atten_w_log_std]
 
 
-# 解码器
 class VGATDecoder(GAE):
     def __init__(self, encoder, decoder=None, decoder_nn_dim1=None):
         super(VGATDecoder, self).__init__(encoder, decoder)

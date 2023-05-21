@@ -7,7 +7,6 @@ import torch_geometric.transforms as Trans
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 import argparse
-import h5py
 import pandas as pd
 
 
@@ -17,11 +16,8 @@ def pretrain(model, optimizer, train_data, val_data, true_label, device):
     for epoch in range(args['max_epoch']):
         model.train()
         z = model.encode(x, edge_index)
-        # 重构邻接图损失
         reconstruction_loss = model.recon_loss(z, train_data.pos_edge_label_index)
-        # 总损失
         L_vgaa = args['re_loss'] * reconstruction_loss + (1 / train_data.num_nodes) * model.kl_loss()
-        # 重构样本
         recon_adjency = model.decoder_nn(z)
         decoder_loss = 0.0
         decoder_loss = F.mse_loss(recon_adjency, x)
@@ -39,7 +35,6 @@ def pretrain(model, optimizer, train_data, val_data, true_label, device):
             ari = adjusted_rand_score(true_label, kmeans.labels_)
             nmi = normalized_mutual_info_score(true_label, kmeans.labels_)
             print(f"epoch {epoch}:nmi {nmi:.4f}, ari {ari:.4f}")
-            # 保存预训练最好的模型参数
             if res_ari <= ari:
                 res_ari = ari
                 torch.save(
@@ -82,46 +77,27 @@ if __name__ == "__main__":
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     args = vars(args)
-    # csv文件读取
     df = pd.read_csv('dataset/{}/{}_ground_truth.csv'.format(args['datasetType'], args['datasetName']))
     true_lab = df['assigned_cluster'].values
-    # adata = read_data('dataset/{}/{}.csv'.format(args['datasetType'], args['datasetName']), file_type='csv')
-
-    # h5文件读取
-    # true_lab = h5py.File('dataset/{}/{}.h5'.format(args['datasetType'], args['datasetName']))['Y'][:]
-    # print(true_lab)
-    # adata = read_data('dataset/{}/{}.h5'.format(args['datasetType'], args['datasetName']), file_type='h5')
-
-    # 预处理数据
-    # adata = preprocess_raw_data(adata)
-    # X = adata.X
-    # 准备训练数据，当基因数远大于1000时选取前1000个高变量基因
-    # adata_hvg, X_hvg = prepare_training_data(adata)
-    # print(adata_hvg)
-    # 生成插补矩阵
-    # X_impute = CMF(X_hvg, 1, 1, 0.0001, 0.0001)
-    # np.save('process/{}_new.npy'.format(args['datasetName']),X_impute)
-    X_impute = np.load('process/{}.npy'.format(args['datasetName']))
-    # 计算距离，生成边列表文件 第一列为结点索引，第二列结点对应的边权值
+    adata = read_data('dataset/{}/{}.csv'.format(args['datasetType'], args['datasetName']), file_type='csv')
+    adata = preprocess_raw_data(adata)
+    X = adata.X
+    adata_hvg, X_hvg = prepare_training_data(adata)
+    X_impute = CMF(X_hvg, 1, 1, 0.0001, 0.0001)
+    np.save('process/{}_new.npy'.format(args['datasetName']),X_impute)
+    # X_impute = np.load('process/{}.npy'.format(args['datasetName']))
     distances, neighbors, cutoff, edgelist = get_edgelist(datasetName=args['datasetName'], X_hvg=X_impute, k=args['k'],
                                                           type='Faiss_KNN')
-    # 读取边列表文件，获得构图的每一条边
     edges = load_separate_graph_edgelist('process/{}_edgelist.txt'.format(args['datasetName']))
-    # print(edges)
-    # 构建邻接图
     data_obj = create_graph(edges, X_impute)
-    # print(data_obj)
     data_obj.train_mask = data_obj.val_mask = data_obj.test_mask = data_obj.y = None
-    # --------------------------------划分数据集------------------------------------#
     test_split = args['test_split']
     val_split = args['val_split']
     try:
         transform = Trans.RandomLinkSplit(num_val=val_split, num_test=test_split,
                                           is_undirected=True, add_negative_train_samples=True,
                                           split_labels=True)
-        # 训练集、验证集和测试集
         train_data, val_data, test_data = transform(data_obj)
-        print(train_data)
     except IndexError as ie:
         print()
         print('Might need to transpose input with the --transpose_input argument.')

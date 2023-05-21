@@ -9,7 +9,6 @@ import pandas as pd
 import torch_geometric.transforms as Trans
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
-from Utils import _get_logger
 
 
 class DEC(nn.Module):
@@ -50,13 +49,9 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
     y_pred_last = np.copy(y_pred)
     ari = adjusted_rand_score(true_label, y_pred)
     nmi = normalized_mutual_info_score(true_label, y_pred)
-    print(f"initial--nmi {nmi:.4f}, ari {ari:.4f}")
     dec.cluster_layer.data = torch.tensor(kmeans.cluster_centers_).to(device)
     res_ari = 0.0000
     res_nmi = 0.0000
-
-    TOTAL_LOSS = []
-    AUROC = []
 
     for epoch in range(args['max_epoch']):
         dec.train()
@@ -66,7 +61,6 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
             y_pred = np.copy(q)
             ari = adjusted_rand_score(true_label, q)
             nmi = normalized_mutual_info_score(true_label, q)
-            # 记录ARI最大的一次，保存最优的嵌入表示和预测标签
             if res_ari <= ari:
                 res_ari = ari
                 res_nmi = nmi
@@ -76,7 +70,6 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
                 # np.save(
                 #     f"results/{args['datasetName']}/embedding.npy",
                 #     z.detach().numpy())
-            print(f"epoch {epoch}:nmi {nmi:.4f}, ari {ari:.4f}")
             delta_label = np.sum(y_pred != y_pred_last).astype(np.float32) / y_pred.shape[0]
             y_pred_last = y_pred
             if epoch > 0 and delta_label < 1e-3:
@@ -86,35 +79,22 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
 
         z, q = dec(x, edge_index)
         p = target_distribution(Q.detach())
-
-        # L_clu
         clu_loss = wasserstein_distance(p, q)
-        # L_vgaa
         vgaa_loss = 0.1 * dec.model.recon_loss(z, train_data.pos_edge_label_index) + (
                 1 / train_data.num_nodes) * dec.model.kl_loss()
-        # 编码部分总损失
         loss = args['clu_loss'] * clu_loss + args['vgaa_loss'] * vgaa_loss
-        # 重构样本
         recon_adjency = dec.model.decoder_nn(z)
         decoder_loss = 0.0
         decoder_loss = F.mse_loss(recon_adjency, x)
         loss += decoder_loss
-        TOTAL_LOSS.append(loss.detach().numpy())
-        print('TOTAL_LOSS',TOTAL_LOSS)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         print('Epoch {:03d} -- Total epoch loss: {:.4f} -- NN decoder epoch loss: {:.4f}'.format(epoch, loss,
                                                                                                  decoder_loss))
         auroc, ap = test(dec, val_data, device)
-        AUROC.append(auroc)
         print('Validation AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
     print('final result---ARI={:.4f},NMI={:.4f}'.format(res_ari, res_nmi))
-    # 记录日志
-    Loss_log = _get_logger('results/logs/{}_Loss_log.log'.format(args['datasetName']))
-    Loss_log.info('total loss--{}'.format(TOTAL_LOSS))
-    Loss_log.info('auroc--{}'.format(AUROC))
-
 
 @torch.no_grad()
 def test(dec, val_data, device):
@@ -149,42 +129,26 @@ if __name__ == "__main__":
     parse.add_argument('--vgaa_loss', type=float, default=0.1)
 
     args = parse.parse_args()
-    # --------------------------------构图------------------------------------#
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
     args = vars(args)
-    # 加载数据集的真实标签
-    # csv文件读取
     df = pd.read_csv('dataset/{}/{}_ground_truth.csv'.format(args['datasetType'], args['datasetName']))
     true_lab = df['assigned_cluster'].values
-
-    # h5文件读取
-    # true_lab = h5py.File('dataset/{}/{}.h5'.format(args['datasetType'], args['datasetName']))['Y'][:]
-
-    # 读取预训练生成的插补基因矩阵
     X_impute = np.load('process/{}.npy'.format(args['datasetName']))
-    # 读取边列表文件，获得构图的每一条边
     edges = load_separate_graph_edgelist('process/{}_edgelist.txt'.format(args['datasetName']))
-    # 构建邻接图
     data_obj = create_graph(edges, X_impute)
-    print(data_obj)
     data_obj.train_mask = data_obj.val_mask = data_obj.test_mask = data_obj.y = None
-    # --------------------------------划分数据集------------------------------------#
     test_split = args['test_split']
     val_split = args['val_split']
     try:
         transform = Trans.RandomLinkSplit(num_val=val_split, num_test=test_split,
                                           is_undirected=True, add_negative_train_samples=True,
                                           split_labels=True)
-        # 训练集、验证集和测试集
         train_data, val_data, test_data = transform(data_obj)
-        print('训练数据集--'.format(train_data))
-        print('验证数据集--'.format(val_data))
     except IndexError as ie:
         print()
         print('Might need to transpose input with the --transpose_input argument.')
 
-    # --------------------------------模型参数------------------------------------#
     num_features = data_obj.num_features
     heads = args['num_heads']
     num_heads = {}
@@ -196,7 +160,6 @@ if __name__ == "__main__":
     latent_dim = args['latent_dim']
     dropout = args['dropout']
     num_clusters = args['num_clusters']
-    # --------------------------------编码器模型-------------------------------------#
     encoder = VGATEncoder(
         in_channels=num_features,
         num_heads=num_heads,
@@ -205,7 +168,6 @@ if __name__ == "__main__":
         dropout=dropout,
         concat={'first': True, 'second': False},
     )
-    # --------------------------------解码器模型及参数训练------------------------------------#
     model = VGATDecoder(encoder=encoder,
                         decoder_nn_dim1=args['decoder_nn_dim1'])
     dec = DEC(num_clusters=num_clusters,
