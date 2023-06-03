@@ -84,7 +84,7 @@ if __name__ == "__main__":
     X = adata.X
     adata_hvg, X_hvg = prepare_training_data(adata)
     X_impute = CMF(X_hvg, 1, 1, 0.0001, 0.0001)
-    np.save('process/{}_new.npy'.format(args['datasetName']),X_impute)
+    np.save('process/{}.npy'.format(args['datasetName']),X_impute)
     # X_impute = np.load('process/{}.npy'.format(args['datasetName']))
     distances, neighbors, cutoff, edgelist = get_edgelist(datasetName=args['datasetName'], X_hvg=X_impute, k=args['k'],
                                                           type='Faiss_KNN')

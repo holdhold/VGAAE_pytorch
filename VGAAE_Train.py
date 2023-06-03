@@ -49,6 +49,7 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
     y_pred_last = np.copy(y_pred)
     ari = adjusted_rand_score(true_label, y_pred)
     nmi = normalized_mutual_info_score(true_label, y_pred)
+    # print(f"initial--nmi {nmi:.4f}, ari {ari:.4f}")
     dec.cluster_layer.data = torch.tensor(kmeans.cluster_centers_).to(device)
     res_ari = 0.0000
     res_nmi = 0.0000
@@ -64,12 +65,12 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
             if res_ari <= ari:
                 res_ari = ari
                 res_nmi = nmi
-                # np.save(
-                #     f"results/{args['datasetName']}/cluster.npy",
-                #     q)
-                # np.save(
-                #     f"results/{args['datasetName']}/embedding.npy",
-                #     z.detach().numpy())
+                np.save(
+                    f"results/{args['datasetName']}/cluster.npy",
+                    q)
+                np.save(
+                    f"results/{args['datasetName']}/embedding.npy",
+                    z.detach().numpy())
             delta_label = np.sum(y_pred != y_pred_last).astype(np.float32) / y_pred.shape[0]
             y_pred_last = y_pred
             if epoch > 0 and delta_label < 1e-3:
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     parse.add_argument('--decoder_nn_dim1', type=int, default=128,
                        help='First hidden dimension for the neural network decoder')
     parse.add_argument('--lr', type=int, default=1e-3, help='Learning rate of Adma')
-    parse.add_argument('--max_epoch', type=int, default=1000, help='Number of training epoch ')
+    parse.add_argument('--max_epoch', type=int, default=200, help='Number of training epoch ')
     parse.add_argument('--test_split', type=float, default=0.1, help='Test split')
     parse.add_argument('--val_split', type=float, default=0.2, help='Validation split')
     parse.add_argument('--update_interval', default=1, type=int)
