@@ -21,7 +21,7 @@ def pretrain(model, optimizer, train_data, val_data, true_label, device):
         recon_adjency = model.decoder_nn(z)
         decoder_loss = 0.0
         decoder_loss = F.mse_loss(recon_adjency, x)
-        loss = args['vgaa_loss']*L_vgaa + decoder_loss
+        loss = args['vgaa_loss'] * L_vgaa + decoder_loss
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -39,7 +39,7 @@ def pretrain(model, optimizer, train_data, val_data, true_label, device):
                 res_ari = ari
                 torch.save(
                     model.state_dict(),
-                f"./pretrain/{args['datasetName']}/{args['datasetName']}.pkl"
+                    f"./Pretrain/{args['datasetName']}/{args['datasetName']}.pkl"
                 )
         auroc, ap = pretest(model, val_data, device)
         print('Validation AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_epoch", type=int, default=200)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--num_clusters", default=7, type=int)
-    parser.add_argument("--num_heads", default=[3, 3, 3, 3], type=int)
+    parser.add_argument("--num_heads", default=[3,3,3,3], type=int)
     parser.add_argument('--k', type=int, default=10, help='K of neighbors Faiss KNN')
     parser.add_argument('--decoder_nn_dim1', type=int, default=128,
                         help='First hidden dimension for the neural network decoder')
@@ -77,18 +77,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     args = vars(args)
-    df = pd.read_csv('dataset/{}/{}_ground_truth.csv'.format(args['datasetType'], args['datasetName']))
+    # csv文件读取
+    df = pd.read_csv('Dataset/{}/{}_ground_truth.csv'.format(args['datasetType'], args['datasetName']))
     true_lab = df['assigned_cluster'].values
-    adata = read_data('dataset/{}/{}.csv'.format(args['datasetType'], args['datasetName']), file_type='csv')
+
+    adata = read_data('Dataset/{}/{}.csv'.format(args['datasetType'], args['datasetName']), file_type='csv')
     adata = preprocess_raw_data(adata)
     X = adata.X
     adata_hvg, X_hvg = prepare_training_data(adata)
     X_impute = CMF(X_hvg, 1, 1, 0.0001, 0.0001)
-    np.save('process/{}.npy'.format(args['datasetName']),X_impute)
-    # X_impute = np.load('process/{}.npy'.format(args['datasetName']))
+    np.save('Process/{}.npy'.format(args['datasetName']), X_impute)
+    # X_impute = np.load('Process/{}.npy'.format(args['datasetName']))
     distances, neighbors, cutoff, edgelist = get_edgelist(datasetName=args['datasetName'], X_hvg=X_impute, k=args['k'],
                                                           type='Faiss_KNN')
-    edges = load_separate_graph_edgelist('process/{}_edgelist.txt'.format(args['datasetName']))
+    edges = load_separate_graph_edgelist('Process/{}_edgelist.txt'.format(args['datasetName']))
     data_obj = create_graph(edges, X_impute)
     data_obj.train_mask = data_obj.val_mask = data_obj.test_mask = data_obj.y = None
     test_split = args['test_split']
@@ -98,6 +100,7 @@ if __name__ == "__main__":
                                           is_undirected=True, add_negative_train_samples=True,
                                           split_labels=True)
         train_data, val_data, test_data = transform(data_obj)
+        print(train_data)
     except IndexError as ie:
         print()
         print('Might need to transpose input with the --transpose_input argument.')

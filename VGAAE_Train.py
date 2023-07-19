@@ -1,4 +1,6 @@
 import argparse
+import time
+
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
@@ -18,7 +20,7 @@ class DEC(nn.Module):
         self.alpha = alpha
         self.model = model
         self.model.load_state_dict(
-            torch.load('./pretrain/{}/{}.pkl'.format(args['datasetName'], args['datasetName']), map_location='cpu'))
+            torch.load('./Pretrain/{}/{}.pkl'.format(args['datasetName'], args['datasetName']), map_location='cpu'))
         self.cluster_layer = Parameter(torch.Tensor(num_clusters, latent_dims))
         torch.nn.init.xavier_normal(self.cluster_layer.data)
 
@@ -49,10 +51,11 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
     y_pred_last = np.copy(y_pred)
     ari = adjusted_rand_score(true_label, y_pred)
     nmi = normalized_mutual_info_score(true_label, y_pred)
-    # print(f"initial--nmi {nmi:.4f}, ari {ari:.4f}")
+    print(f"initial--nmi {nmi:.4f}, ari {ari:.4f}")
     dec.cluster_layer.data = torch.tensor(kmeans.cluster_centers_).to(device)
     res_ari = 0.0000
     res_nmi = 0.0000
+    res_acc = 0.0000
 
     for epoch in range(args['max_epoch']):
         dec.train()
@@ -62,14 +65,17 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
             y_pred = np.copy(q)
             ari = adjusted_rand_score(true_label, q)
             nmi = normalized_mutual_info_score(true_label, q)
+            acc = cluster_accuracy(true_label, q)
             if res_ari <= ari:
                 res_ari = ari
                 res_nmi = nmi
+                res_acc = acc
+                opt_probability = Q.detach().data.cpu().numpy()
                 np.save(
-                    f"results/{args['datasetName']}/cluster.npy",
+                    f"VGAAEResults/{args['datasetName']}/cluster.npy",
                     q)
                 np.save(
-                    f"results/{args['datasetName']}/embedding.npy",
+                    f"VGAAEResults/{args['datasetName']}/embedding.npy",
                     z.detach().numpy())
             delta_label = np.sum(y_pred != y_pred_last).astype(np.float32) / y_pred.shape[0]
             y_pred_last = y_pred
@@ -78,27 +84,30 @@ def train(dec, optimizer, train_data, val_data, device, true_label):
                 print('Reach tolerance threshold,Stopping training.')
                 break
 
-        z, q = dec(x, edge_index)
-        p = target_distribution(Q.detach())
-        clu_loss = wasserstein_distance(p, q)
-        vgaa_loss = 0.1 * dec.model.recon_loss(z, train_data.pos_edge_label_index) + (
-                1 / train_data.num_nodes) * dec.model.kl_loss()
-        loss = args['clu_loss'] * clu_loss + args['vgaa_loss'] * vgaa_loss
-        recon_adjency = dec.model.decoder_nn(z)
-        decoder_loss = 0.0
-        decoder_loss = F.mse_loss(recon_adjency, x)
-        loss += decoder_loss
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        print('Epoch {:03d} -- Total epoch loss: {:.4f} -- NN decoder epoch loss: {:.4f}'.format(epoch, loss,
-                                                                                                 decoder_loss))
-        auroc, ap = test(dec, val_data, device)
-        print('Validation AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
-    print('final result---ARI={:.4f},NMI={:.4f}'.format(res_ari, res_nmi))
+            z, q = dec(x, edge_index)
+            p = target_distribution(Q.detach())
+
+            clu_loss = wasserstein_distance(p, q)
+            vgaa_loss = 0.1 * dec.model.recon_loss(z, train_data.pos_edge_label_index) + (
+                    1 / train_data.num_nodes) * dec.model.kl_loss()
+            loss = args['clu_loss'] * clu_loss + args['vgaa_loss'] * vgaa_loss
+            recon_adjency = dec.model.decoder_nn(z)
+            decoder_loss = 0.0
+            decoder_loss = F.mse_loss(recon_adjency, x)
+            loss += decoder_loss
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            print('Epoch {:03d} -- Total epoch loss: {:.4f} -- NN decoder epoch loss: {:.4f}'.format(epoch, loss,
+                                                                                                     decoder_loss))
+            auroc, ap = test_(dec, val_data, device)
+            print('Validation AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
+
+    print('final result---ARI={:.4f},NMI={:.4f},CA={:.4f}'.format(res_ari, res_nmi, res_acc))
+
 
 @torch.no_grad()
-def test(dec, val_data, device):
+def test_(dec, val_data, device):
     dec = dec.eval()
     z = dec.model.encode(val_data.x.to(torch.float).to(device), val_data.edge_index.to(torch.long).to(device))
     auroc, ap = dec.model.test(z, val_data.pos_edge_label_index.to(torch.long).to(device),
@@ -127,17 +136,29 @@ if __name__ == "__main__":
     parse.add_argument('--num_clusters', type=int, default=7, help='Number of clusters')
 
     parse.add_argument('--clu_loss', type=float, default=1)
-    parse.add_argument('--vgaa_loss', type=float, default=0.1)
+    parse.add_argument('--vgaa_loss', type=float, default=0.5)
 
     args = parse.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
     args = vars(args)
-    df = pd.read_csv('dataset/{}/{}_ground_truth.csv'.format(args['datasetType'], args['datasetName']))
+    df = pd.read_csv('Dataset/{}/{}_ground_truth.csv'.format(args['datasetType'], args['datasetName']))
     true_lab = df['assigned_cluster'].values
-    X_impute = np.load('process/{}.npy'.format(args['datasetName']))
-    edges = load_separate_graph_edgelist('process/{}_edgelist.txt'.format(args['datasetName']))
+    types = np.unique(true_lab)
+    true_lab = np.array(true_lab)
+    types = np.unique(true_lab)
+    ids = np.arange(0, len(types))
+    dict1 = {}
+    dict1 = dict(zip(ids, types))
+    for id, type in dict1.items():
+        for i in range(len(true_lab)):
+            if true_lab[i] == type:
+                true_lab[i] = id
+
+    X_impute = np.load('Process/{}.npy'.format(args['datasetName']))
+    edges = load_separate_graph_edgelist('Process/{}_edgelist.txt'.format(args['datasetName']))
     data_obj = create_graph(edges, X_impute)
+    print(data_obj)
     data_obj.train_mask = data_obj.val_mask = data_obj.test_mask = data_obj.y = None
     test_split = args['test_split']
     val_split = args['val_split']
@@ -175,9 +196,14 @@ if __name__ == "__main__":
               model=model,
               latent_dims=latent_dim)
     optimizer = torch.optim.Adam(dec.parameters(), lr=args['lr'])
+
+    start_time = time.time()
     train(dec=dec,
           optimizer=optimizer,
           train_data=train_data,
           val_data=val_data,
           device=device,
           true_label=true_lab)
+    end_time = time.time()
+    run_time = (end_time - start_time) / 60
+    print('cost of train: run time is %.2f ' % run_time, 'minutes')

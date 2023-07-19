@@ -86,15 +86,11 @@ def train(dec, optimizer, train_data, device, true_label, num_subsample, num_rec
         z, q = dec(x, edge_index)
         p = target_distribution(Q.detach())
 
-        # wasserstein distance
         clu_loss = wasserstein_distance(p, q)
 
-        # L_vgaa
         vgaa_loss = 0.1 * dec.model.recon_loss(z, train_data.pos_edge_label_index) + (
                 1 / train_data.num_nodes) * dec.model.kl_loss()
-        # 编码部分总损失
         loss = args['clu_loss'] * clu_loss + args['vgaa_loss'] * vgaa_loss
-        # 重构样本
         recon_adjency = dec.model.decoder_nn(z)
         decoder_loss = 0.0
         decoder_loss = F.mse_loss(recon_adjency, x)
@@ -109,8 +105,8 @@ def train(dec, optimizer, train_data, device, true_label, num_subsample, num_rec
 
 if __name__ == "__main__":
     parse = argparse.ArgumentParser(prog='train', description='VGAAC train')
-    parse.add_argument("--datasetType", type=str, default="Chen")
-    parse.add_argument("--datasetName", type=str, default="Chen")
+    parse.add_argument("--datasetType", type=str, default="Baron_Human")
+    parse.add_argument("--datasetName", type=str, default="Baron_Human2")
     parse.add_argument('--num_hidden_layers', type=int, default=2, help='Number of hidden layers')
     parse.add_argument('--hidden_dims', type=int, default=[128, 128],
                        help='Output dimension for each hidden layer.')
@@ -129,9 +125,9 @@ if __name__ == "__main__":
     parse.add_argument('--vgaa_loss', type=float, default=0.5)
     parse.add_argument('--update_interval', default=1, type=int)
     parse.add_argument('--num_subsample', type=float, default=20, help='Number of subsample')
-    parse.add_argument('--num_clusters', type=int, default=47, help='Number of clusters')
-    parse.add_argument('--divide_cluster', type=int, default=37, help='divide of clusters')
-    parse.add_argument('--step_cluster', type=int, default=5, help='step of clusters')
+    parse.add_argument('--num_clusters', type=int, default=14, help='Number of clusters')
+    parse.add_argument('--divide_cluster', type=int, default=8, help='divide of clusters')
+    parse.add_argument('--step_cluster', type=int, default=1, help='step of clusters')
 
     args = parse.parse_args()
 
@@ -144,14 +140,11 @@ if __name__ == "__main__":
         for i in range(args['num_subsample']):
             X_impute = np.load(
                 './tmpFile/{}/X_impute_subsample{}_cluster{}.npy'.format(args['datasetName'], (i + 1), cur_cluster))
-            # 读取边列表文件，获得构图的每一条边
             edges = load_separate_graph_edgelist(
                 './tmpFile/{}/edgelist_subsample{}_cluster{}.txt'.format(args['datasetName'], (i + 1), cur_cluster))
             true_lab = np.load(
                 './tmpFile/{}/true_lab_subsample{}_cluster{}.npy'.format(args['datasetName'], (i + 1), cur_cluster))
-            # 构建邻接图
             data_obj = create_graph(edges, X_impute)
-            # print(data_obj)
             data_obj.num_nodes = X_impute.shape[0]
             data_obj.train_mask = data_obj.val_mask = data_obj.test_mask = data_obj.y = None
             test_split = args['test_split']
@@ -160,9 +153,7 @@ if __name__ == "__main__":
                 transform = Trans.RandomLinkSplit(num_val=val_split, num_test=test_split,
                                                   is_undirected=True, add_negative_train_samples=True,
                                                   split_labels=True)
-                # 训练集、验证集和测试集
                 train_data, val_data, test_data = transform(data_obj)
-                # print(train_data)
             except IndexError as ie:
                 print()
                 print('Might need to transpose input with the --transpose_input argument.')
@@ -178,7 +169,6 @@ if __name__ == "__main__":
             latent_dim = args['latent_dim']
             dropout = args['dropout']
             num_clusters = cur_cluster
-            # 相同的参数下训练两次，记录每一次的预测标签
             for j in range(2):
                 encoder = VGATEncoder(
                     in_channels=num_features,

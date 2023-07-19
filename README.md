@@ -19,5 +19,30 @@ You can run the clustering results of VGAAE on Baron-Human2 using the following 
 ```python
 python VGAAE_Train.py --datasetType Baron_Human --datasetName Baron_Human2 --num_clusters 7
 ```
-The clustering labels and representation learning are stored in the './results' folder.
+The clustering labels and representation learning are stored in the './VGAAEResults' folder.
+
+The selection of the optimal number of clusters can be guided by the Jaccard Index in VGAAE, but VGAAE runs through the CPU, so this process takes some time. We prefer you to get the clustering results by manually setting a reasonable num_cluster parameter.
+You can perform the selection of the optimal number of clusters with the following command:
+
+**pre-train**
+
+```python
+python SelectClusters/preTrain.py --datasetType datasetTypeStr --datasetName datasetNameStr -- --num_clusters realClusterStr --divide_cluster divideStr --step_cluster stepStr
+```
+
+**train**
+
+```python
+python SelectClusters/Train.py --datasetType datasetTypeStr --datasetName datasetNameStr -- --num_clusters realClusterStr --divide_cluster divideStr --step_cluster stepStr
+```
+
+```xml
+--datasetType:type of dataset
+--datasetName:name od dataset
+--num_clusters:number of true group in the dataset
+--divide_cluster:Validated cluster count interval, [num_clusters-divide_cluster,num_clusters] 
+--step_cluster:number of validated cluster steps
+```
+
+
 

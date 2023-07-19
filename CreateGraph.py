@@ -7,6 +7,7 @@ import faiss
 from torch_geometric.data import Data
 from torch_geometric.utils import to_undirected
 from sklearn.preprocessing import MinMaxScaler
+import h5py
 import random
 
 
@@ -14,8 +15,15 @@ def read_data(file_path, file_type):
     adata = []
     if file_type == 'csv':
         adata = anndata.read_csv(file_path)
+        # adata=adata.T
+    if file_type == 'normal':
+        df_data = pd.read_csv(file_path)
+        data = df_data.to_numpy().T
+        ori_metrix = data[1:, 2:].astype(float)
+        adata = anndata.AnnData(ori_metrix)
+    if file_type == 'h5':
+        adata = sc.read_hdf(file_path, 'X')
     return adata
-
 
 def subsample_anndata(adata):
     seed = random.randint(1, 10000)
@@ -34,7 +42,6 @@ def prepare_training_data(adata):
     adata_hvg = adata_hvg[:, adata_hvg.var['highly_variable'].values]
     X_hvg = adata_hvg.X
     return adata_hvg, X_hvg
-
 
 
 def faiss_knn(data_nmupy, k, metric='euclidean'):
@@ -59,9 +66,7 @@ def faiss_knn(data_nmupy, k, metric='euclidean'):
     distances, neighbors = index.search(data_nmupy, k)
     return distances, neighbors
 
-
-
-def get_edgelist(datasetName, X_hvg, k, type):
+def get_sub_edgelist(datasetName, X_hvg, k, type,num_subsample,cur_cluster):
     if type == 'Faiss_KNN':
         distances, neighbors = faiss_knn(data_nmupy=X_hvg, k=k)
     cutoff = np.mean(np.nonzero(distances), axis=None)
@@ -75,7 +80,29 @@ def get_edgelist(datasetName, X_hvg, k, type):
                 if distance < cutoff:
                     if i != neighbors[i][j]:
                         edgelist.append(pair)
-    filname = 'process/{}_edgelist.txt'.format(datasetName)
+    # 将边列表保存为txt文件
+    filname = '../SelectClusters/tmpFile/{}/edgelist_subsample{}_cluster{}.txt'.format(datasetName, num_subsample, cur_cluster)
+    with open(filname, 'w') as f:
+        edegs = [' '.join(e) + '\n' for e in edgelist]
+        f.writelines(edegs)
+    return distances, neighbors, cutoff, edgelist
+
+def get_edgelist(datasetName, X_hvg, k, type):
+    if type == 'Faiss_KNN':
+        distances, neighbors = faiss_knn(data_nmupy=X_hvg, k=k)
+
+    cutoff = np.mean(np.nonzero(distances), axis=None)
+    print(cutoff)
+    edgelist = []
+    for i in range(neighbors.shape[0]):
+        for j in range(neighbors.shape[1]):
+            if neighbors[i][j] != -1:
+                pair = (str(i), str(neighbors[i][j]))
+                distance = distances[i][j]
+                if distance < cutoff:
+                    if i != neighbors[i][j]:
+                        edgelist.append(pair)
+    filname = '../Process/{}_edgelist.txt'.format(datasetName)
     with open(filname, 'w') as f:
         edegs = [' '.join(e) + '\n' for e in edgelist]
         f.writelines(edegs)
